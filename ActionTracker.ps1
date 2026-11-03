@@ -81,7 +81,7 @@ public class TrackerTask : INotifyPropertyChanged {
 "@
 
 # --- Version / auto-update ---
-$AppVersion = '1.2.1'
+$AppVersion = '1.2.2'
 $RepoRaw    = 'https://raw.githubusercontent.com/vansummers/ActionTracker/main'
 $VersionUrl = "$RepoRaw/version.txt"
 $ScriptUrl  = "$RepoRaw/ActionTracker.ps1"
@@ -719,25 +719,27 @@ function Invoke-SelfUpdate {
 }
 $updateBtn.Add_Click({ Invoke-SelfUpdate })
 
-# Non-blocking check: show the Update button only if GitHub has a newer version.
-try {
-    $checker = New-Object System.Net.WebClient
-    $checker.Headers.Add('User-Agent', 'ActionTracker')
-    $checker.add_DownloadStringCompleted({
-        param($s, $e)
-        if ($e.Error) { return }
-        try {
-            $remote = ("$($e.Result)").Trim()
-            if ($remote -and ([version]$remote -gt [version]$AppVersion)) {
-                $win.Dispatcher.Invoke([Action]{
-                    $updateBtn.ToolTip  = "Version $remote is available (you have $AppVersion) - click to update"
-                    $updateBtn.Visibility = 'Visible'
-                })
-            }
-        } catch {}
-    })
-    $checker.DownloadStringAsync([uri]$VersionUrl)
-} catch {}
+# Update check: one-shot, on the UI thread (no background-thread event handler,
+# which could crash the app), with a bounded, fully-guarded network call.
+$updateCheckTimer = New-Object System.Windows.Threading.DispatcherTimer
+$updateCheckTimer.Interval = [TimeSpan]::FromSeconds(3)
+$updateCheckTimer.add_Tick({
+    $updateCheckTimer.Stop()   # run once
+    try {
+        try { [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 } catch {}
+        $req = [System.Net.WebRequest]::Create($VersionUrl)
+        $req.Timeout = 4000
+        $resp = $req.GetResponse()
+        $sr = New-Object System.IO.StreamReader($resp.GetResponseStream())
+        $remote = $sr.ReadToEnd().Trim()
+        $sr.Close(); $resp.Close()
+        if ($remote -and ([version]$remote -gt [version]$AppVersion)) {
+            $updateBtn.ToolTip = "Version $remote is available (you have $AppVersion) - click to update"
+            $updateBtn.Visibility = 'Visible'
+        }
+    } catch {}
+})
+$updateCheckTimer.Start()
 
 # --- Show ---
 [void]$win.ShowDialog()
