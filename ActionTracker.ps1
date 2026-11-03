@@ -16,6 +16,8 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 
 # --- Task model with change notification ---
 Add-Type @"
@@ -79,7 +81,7 @@ public class TrackerTask : INotifyPropertyChanged {
 "@
 
 # --- Version / auto-update ---
-$AppVersion = '1.1.0'
+$AppVersion = '1.2.0'
 $RepoRaw    = 'https://raw.githubusercontent.com/vansummers/ActionTracker/main'
 $VersionUrl = "$RepoRaw/version.txt"
 $ScriptUrl  = "$RepoRaw/ActionTracker.ps1"
@@ -167,6 +169,7 @@ if (-not (Test-Path $AppDir)) { New-Item -ItemType Directory -Path $AppDir -Forc
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <TextBlock Grid.Column="0" Text="Action Tracker" Foreground="#E8EAED"
                    FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
@@ -175,9 +178,12 @@ if (-not (Test-Path $AppDir)) { New-Item -ItemType Directory -Path $AppDir -Forc
                 ToolTip="A newer version is available — click to update"/>
         <Button x:Name="ViewBtn" Grid.Column="2" Style="{StaticResource IconBtn}"
                 Content="Active" FontSize="11" ToolTip="Switch between active and completed"/>
-        <Button x:Name="PinBtn" Grid.Column="3" Style="{StaticResource IconBtn}"
+        <Button x:Name="DockBtn" Grid.Column="3" Style="{StaticResource IconBtn}"
+                Content="Dock" FontSize="11" Opacity="0.4"
+                ToolTip="Auto-hide to the right edge; hover the edge to peek it out"/>
+        <Button x:Name="PinBtn" Grid.Column="4" Style="{StaticResource IconBtn}"
                 Content="Top" ToolTip="Toggle always-on-top"/>
-        <Button x:Name="CloseBtn" Grid.Column="4" Style="{StaticResource IconBtn}"
+        <Button x:Name="CloseBtn" Grid.Column="5" Style="{StaticResource IconBtn}"
                 Content="&#x2715;" ToolTip="Close"/>
       </Grid>
 
@@ -385,6 +391,7 @@ $pinBtn    = $win.FindName('PinBtn')
 $closeBtn  = $win.FindName('CloseBtn')
 $clearBtn  = $win.FindName('ClearBtn')
 $updateBtn = $win.FindName('UpdateBtn')
+$dockBtn   = $win.FindName('DockBtn')
 
 # --- State ---
 $allTasks = New-Object 'System.Collections.ObjectModel.ObservableCollection[TrackerTask]'
@@ -394,6 +401,10 @@ $projInput.ItemsSource = $projects
 $script:view = [System.Windows.Data.CollectionViewSource]::GetDefaultView($allTasks)
 $script:showCompleted = $false
 $script:suppressSave  = $true   # don't save while loading
+$script:dockEnabled   = $false  # edge auto-hide ("peek") mode
+$script:dockWanted    = $false  # restored from saved state, applied once the window loads
+$script:dockHideAt    = $null
+$script:dockPrevTopmost = $false
 
 # Filter: active view shows not-done; completed view shows done
 $script:view.Filter = [Predicate[object]]{
@@ -425,6 +436,22 @@ function Refresh-View { $win.Dispatcher.BeginInvoke([Action]{ $script:view.Refre
 # --- Persistence ---
 function Save-State {
     if ($script:suppressSave) { return }
+    # While docked the window's Left/Topmost are transient (slid off-edge, forced
+    # on-top); persist the user's real values instead.
+    $saveLeft    = [double]$win.Left
+    $saveTopmost = [bool]$win.Topmost
+    if ($script:dockEnabled) {
+        $saveTopmost = [bool]$script:dockPrevTopmost
+        try {
+            $src = [System.Windows.PresentationSource]::FromVisual($win)
+            if ($src) {
+                $dpiX = $src.CompositionTarget.TransformToDevice.M11
+                $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($win)).Handle
+                $wa   = [System.Windows.Forms.Screen]::FromHandle($hwnd).WorkingArea
+                $saveLeft = ($wa.Right / $dpiX) - $win.Width
+            }
+        } catch {}
+    }
     $data = [ordered]@{
         schema = 2
         tasks = @(foreach ($t in $allTasks) {
@@ -437,11 +464,12 @@ function Save-State {
             }
         })
         window = @{
-            left    = [double]$win.Left
+            left    = $saveLeft
             top     = [double]$win.Top
             width   = [double]$win.Width
             height  = [double]$win.Height
-            topmost = [bool]$win.Topmost
+            topmost = $saveTopmost
+            docked  = [bool]$script:dockEnabled
         }
     }
     try { ($data | ConvertTo-Json -Depth 6) | Set-Content -Path $StateFile -Encoding UTF8 } catch {}
@@ -494,6 +522,7 @@ function Load-State {
         } else {
             $win.Topmost = $false
         }
+        if ($data.window.docked -ne $null) { $script:dockWanted = [bool]$data.window.docked }
     }
     Update-Footer
 }
@@ -525,9 +554,10 @@ $inputBox.Add_KeyDown({
     if ($e.Key -eq 'Return') { Add-Task; $e.Handled = $true }
 })
 
-# Drag the window by its header
+# Drag the window by its header (disabled while docked, since docking controls position)
 $header.Add_MouseLeftButtonDown({
     param($s, $e)
+    if ($script:dockEnabled) { return }
     try { $win.DragMove() } catch {}
 })
 
@@ -568,6 +598,72 @@ $pinBtn.Add_Click({
     Save-State
 })
 
+# --- Edge auto-hide ("peek") dock -----------------------------------------------
+# When enabled, the widget slides off the right edge leaving a thin sliver. Moving
+# the mouse to that edge slides it out; clicking away slides it back after a beat.
+$dockTimer = New-Object System.Windows.Threading.DispatcherTimer
+$dockTimer.Interval = [TimeSpan]::FromMilliseconds(120)
+$dockTimer.add_Tick({
+    if (-not $script:dockEnabled) { return }
+    try {
+        $src = [System.Windows.PresentationSource]::FromVisual($win)
+        if (-not $src) { return }
+        $dpiX = $src.CompositionTarget.TransformToDevice.M11
+        $dpiY = $src.CompositionTarget.TransformToDevice.M22
+        $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($win)).Handle
+        $wa   = [System.Windows.Forms.Screen]::FromHandle($hwnd).WorkingArea
+        $sliver = 6.0
+        $shownLeft  = ($wa.Right / $dpiX) - $win.Width
+        $hiddenLeft = ($wa.Right / $dpiX) - $sliver
+
+        $cur = [System.Windows.Forms.Control]::MousePosition  # screen pixels
+        $winLeftPx  = $win.Left * $dpiX
+        $winTopPx   = $win.Top  * $dpiY
+        $winRightPx = ($win.Left + $win.Width)  * $dpiX
+        $winBotPx   = ($win.Top  + $win.Height) * $dpiY
+        $m = 8
+        $over   = ($cur.X -ge $winLeftPx - $m) -and ($cur.X -le $winRightPx + $m) -and ($cur.Y -ge $winTopPx - $m) -and ($cur.Y -le $winBotPx + $m)
+        $atEdge = ($cur.X -ge $wa.Right - 2)   -and ($cur.Y -ge $winTopPx - $m) -and ($cur.Y -le $winBotPx + $m)
+
+        if ($over -or $atEdge -or $win.IsActive) {
+            $script:dockHideAt = $null
+            $target = $shownLeft
+        } else {
+            if ($null -eq $script:dockHideAt) { $script:dockHideAt = (Get-Date).AddMilliseconds(700) }
+            $target = $(if ((Get-Date) -ge $script:dockHideAt) { $hiddenLeft } else { $shownLeft })
+        }
+        $delta = $target - $win.Left
+        if ([math]::Abs($delta) -lt 1) { $win.Left = $target } else { $win.Left = $win.Left + $delta * 0.35 }
+    } catch {}
+})
+
+function Enable-Dock {
+    $script:dockEnabled = $true
+    $script:dockPrevTopmost = [bool]$win.Topmost
+    $win.Topmost = $true          # so the peeked widget appears above other windows
+    $dockBtn.Opacity = 1.0
+    $script:dockHideAt = $null
+    $dockTimer.Start()
+    Save-State
+}
+function Disable-Dock {
+    $script:dockEnabled = $false
+    $dockTimer.Stop()
+    $win.Topmost = $script:dockPrevTopmost
+    $dockBtn.Opacity = 0.4
+    try {
+        $src = [System.Windows.PresentationSource]::FromVisual($win)
+        if ($src) {
+            $dpiX = $src.CompositionTarget.TransformToDevice.M11
+            $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper($win)).Handle
+            $wa   = [System.Windows.Forms.Screen]::FromHandle($hwnd).WorkingArea
+            $win.Left = ($wa.Right / $dpiX) - $win.Width   # bring fully back on-screen
+        }
+    } catch {}
+    Save-State
+}
+$dockBtn.Add_Click({ if ($script:dockEnabled) { Disable-Dock } else { Enable-Dock } })
+
 # Permanently clear completed tasks
 $clearBtn.Add_Click({
     for ($i = $allTasks.Count - 1; $i -ge 0; $i--) {
@@ -579,9 +675,13 @@ $clearBtn.Add_Click({
 $closeBtn.Add_Click({ $win.Close() })
 
 # Save position/size when moved or resized, and on close
-$win.Add_LocationChanged({ Save-State })
+# (skip LocationChanged while docked — the dock loop drives Left, so saving is noise)
+$win.Add_LocationChanged({ if ($script:dockEnabled) { return }; Save-State })
 $win.Add_SizeChanged({ Save-State })
 $win.Add_Closing({ Save-State })
+
+# Apply saved dock mode once the window is rendered (needs a live PresentationSource)
+$win.Add_Loaded({ if ($script:dockWanted) { Enable-Dock } })
 
 # --- Load saved state, then allow saving ---
 Load-State

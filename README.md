@@ -52,6 +52,13 @@ runs. Built to be **Themia-like for a to-do list**, but with no account and no s
 - **Top:** toggles always-on-top. Dim (default) = background behaviour above; click
   it so it's bright to pin the widget *above* all other windows instead. Your choice
   is remembered.
+- **Dock (auto-hide / peek):** click **Dock** in the header to tuck the widget off
+  the right edge of the screen, leaving only a thin sliver. Move your mouse to that
+  right edge and it slides out; click away and it slides back after a moment — like
+  an auto-hiding taskbar. While docked it appears above other windows when peeked.
+  Click **Dock** again to turn it off and bring the widget back onto the desktop.
+  The setting is remembered between runs. (Dragging is paused while docked, since
+  docking controls the position — undock to move it.)
 - **Close (✕ top-right):** closes the widget. Everything (active tasks, completed
   history, due dates, window position) is saved; relaunch any time.
 
