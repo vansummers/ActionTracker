@@ -45,8 +45,13 @@ runs. Built to be **Themia-like for a to-do list**, but with no account and no s
 - **Delete:** click the **✕** on the right of a task (removes it entirely).
 - **Clear completed:** shown only in the Completed view — permanently removes all
   completed tasks once you no longer need them for review.
-- **Top:** toggles always-on-top. On = stays above other windows; dim = behaves
-  like a normal window so it can sit behind what you're working in.
+- **Background behaviour (default):** the widget sits on your desktop like a normal
+  window — when you click another program, the widget drops *behind* it. It stays
+  open in the background. To bring it forward for a glance, click its button on the
+  Windows taskbar (or press `Win + D` to show the desktop).
+- **Top:** toggles always-on-top. Dim (default) = background behaviour above; click
+  it so it's bright to pin the widget *above* all other windows instead. Your choice
+  is remembered.
 - **Close (✕ top-right):** closes the widget. Everything (active tasks, completed
   history, due dates, window position) is saved; relaunch any time.
 

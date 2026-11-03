@@ -91,7 +91,7 @@ if (-not (Test-Path $AppDir)) { New-Item -ItemType Directory -Path $AppDir -Forc
         Title="Action Tracker"
         Width="430" Height="470"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
-        ShowInTaskbar="False" Topmost="True" ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="True" Topmost="False" ResizeMode="CanResizeWithGrip"
         MinWidth="340" MinHeight="240"
         FontFamily="Segoe UI">
   <Window.Resources>
@@ -415,6 +415,7 @@ function Refresh-View { $win.Dispatcher.BeginInvoke([Action]{ $script:view.Refre
 function Save-State {
     if ($script:suppressSave) { return }
     $data = [ordered]@{
+        schema = 2
         tasks = @(foreach ($t in $allTasks) {
             @{
                 text        = $t.Text
@@ -474,7 +475,14 @@ function Load-State {
             $win.Left = [double]$data.window.left
             $win.Top  = [double]$data.window.top
         }
-        if ($data.window.topmost -ne $null) { $win.Topmost = [bool]$data.window.topmost }
+        # Honour a saved always-on-top choice only for state written by this version
+        # (schema >= 2). Older files defaulted to always-on-top, so migrate them to
+        # the new background default instead of restoring the old behaviour.
+        if ($data.schema -and [int]$data.schema -ge 2) {
+            if ($data.window.topmost -ne $null) { $win.Topmost = [bool]$data.window.topmost }
+        } else {
+            $win.Topmost = $false
+        }
     }
     Update-Footer
 }
