@@ -81,7 +81,7 @@ public class TrackerTask : INotifyPropertyChanged {
 "@
 
 # --- Version / auto-update ---
-$AppVersion = '1.2.0'
+$AppVersion = '1.2.1'
 $RepoRaw    = 'https://raw.githubusercontent.com/vansummers/ActionTracker/main'
 $VersionUrl = "$RepoRaw/version.txt"
 $ScriptUrl  = "$RepoRaw/ActionTracker.ps1"
@@ -175,7 +175,7 @@ if (-not (Test-Path $AppDir)) { New-Item -ItemType Directory -Path $AppDir -Forc
                    FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
         <Button x:Name="UpdateBtn" Grid.Column="1" Style="{StaticResource IconBtn}"
                 Content="&#x2b07; Update" FontSize="11" Foreground="#8BD5A0" Visibility="Collapsed"
-                ToolTip="A newer version is available — click to update"/>
+                ToolTip="A newer version is available - click to update"/>
         <Button x:Name="ViewBtn" Grid.Column="2" Style="{StaticResource IconBtn}"
                 Content="Active" FontSize="11" ToolTip="Switch between active and completed"/>
         <Button x:Name="DockBtn" Grid.Column="3" Style="{StaticResource IconBtn}"
@@ -260,7 +260,7 @@ if (-not (Test-Path $AppDir)) { New-Item -ItemType Directory -Path $AppDir -Forc
                 </CheckBox>
                 <Button Tag="reopen"
                         Content="{Binding CompletedAt, StringFormat='&#x2713; {0:MMM d}'}"
-                        ToolTip="Completed — click to undo / reopen">
+                        ToolTip="Completed - click to undo / reopen">
                   <Button.Style>
                     <Style TargetType="Button" BasedOn="{StaticResource StampBtn}">
                       <Setter Property="Visibility" Value="Collapsed"/>
@@ -675,7 +675,7 @@ $clearBtn.Add_Click({
 $closeBtn.Add_Click({ $win.Close() })
 
 # Save position/size when moved or resized, and on close
-# (skip LocationChanged while docked — the dock loop drives Left, so saving is noise)
+# (skip LocationChanged while docked - the dock loop drives Left, so saving is noise)
 $win.Add_LocationChanged({ if ($script:dockEnabled) { return }; Save-State })
 $win.Add_SizeChanged({ Save-State })
 $win.Add_Closing({ Save-State })
@@ -730,7 +730,7 @@ try {
             $remote = ("$($e.Result)").Trim()
             if ($remote -and ([version]$remote -gt [version]$AppVersion)) {
                 $win.Dispatcher.Invoke([Action]{
-                    $updateBtn.ToolTip  = "Version $remote is available (you have $AppVersion) — click to update"
+                    $updateBtn.ToolTip  = "Version $remote is available (you have $AppVersion) - click to update"
                     $updateBtn.Visibility = 'Visible'
                 })
             }
