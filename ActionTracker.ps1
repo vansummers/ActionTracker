@@ -78,6 +78,12 @@ public class TrackerTask : INotifyPropertyChanged {
 }
 "@
 
+# --- Version / auto-update ---
+$AppVersion = '1.1.0'
+$RepoRaw    = 'https://raw.githubusercontent.com/vansummers/ActionTracker/main'
+$VersionUrl = "$RepoRaw/version.txt"
+$ScriptUrl  = "$RepoRaw/ActionTracker.ps1"
+
 # --- Storage paths ---
 $AppDir    = Join-Path $env:APPDATA 'ActionTracker'
 $StateFile = Join-Path $AppDir 'state.json'
@@ -160,14 +166,18 @@ if (-not (Test-Path $AppDir)) { New-Item -ItemType Directory -Path $AppDir -Forc
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
         <TextBlock Grid.Column="0" Text="Action Tracker" Foreground="#E8EAED"
                    FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
-        <Button x:Name="ViewBtn" Grid.Column="1" Style="{StaticResource IconBtn}"
+        <Button x:Name="UpdateBtn" Grid.Column="1" Style="{StaticResource IconBtn}"
+                Content="&#x2b07; Update" FontSize="11" Foreground="#8BD5A0" Visibility="Collapsed"
+                ToolTip="A newer version is available — click to update"/>
+        <Button x:Name="ViewBtn" Grid.Column="2" Style="{StaticResource IconBtn}"
                 Content="Active" FontSize="11" ToolTip="Switch between active and completed"/>
-        <Button x:Name="PinBtn" Grid.Column="2" Style="{StaticResource IconBtn}"
+        <Button x:Name="PinBtn" Grid.Column="3" Style="{StaticResource IconBtn}"
                 Content="Top" ToolTip="Toggle always-on-top"/>
-        <Button x:Name="CloseBtn" Grid.Column="3" Style="{StaticResource IconBtn}"
+        <Button x:Name="CloseBtn" Grid.Column="4" Style="{StaticResource IconBtn}"
                 Content="&#x2715;" ToolTip="Close"/>
       </Grid>
 
@@ -374,6 +384,7 @@ $viewBtn   = $win.FindName('ViewBtn')
 $pinBtn    = $win.FindName('PinBtn')
 $closeBtn  = $win.FindName('CloseBtn')
 $clearBtn  = $win.FindName('ClearBtn')
+$updateBtn = $win.FindName('UpdateBtn')
 
 # --- State ---
 $allTasks = New-Object 'System.Collections.ObjectModel.ObservableCollection[TrackerTask]'
@@ -577,6 +588,56 @@ Load-State
 Refresh-View
 $script:suppressSave = $false
 if (-not $win.Topmost) { $pinBtn.Opacity = 0.4 }
+
+# --- Auto-update ---------------------------------------------------------------
+# Downloads the latest script from GitHub, overwrites this file, and relaunches.
+function Invoke-SelfUpdate {
+    try {
+        $wc = New-Object System.Net.WebClient
+        $wc.Headers.Add('User-Agent', 'ActionTracker')
+        $newText = $wc.DownloadString($ScriptUrl)
+        if ([string]::IsNullOrWhiteSpace($newText) -or $newText.Length -lt 500) {
+            throw "The downloaded file looks empty or invalid."
+        }
+        $target = $PSCommandPath
+        if (-not $target) { $target = $MyInvocation.MyCommand.Path }
+        Set-Content -Path $target -Value $newText -Encoding UTF8
+        $dir = Split-Path -Parent $target
+        $vbs = Join-Path $dir 'Start-ActionTracker.vbs'
+        if (Test-Path $vbs) {
+            Start-Process -FilePath 'wscript.exe' -ArgumentList "`"$vbs`""
+        } else {
+            Start-Process -FilePath 'powershell.exe' -ArgumentList @(
+                '-NoProfile','-ExecutionPolicy','Bypass','-STA','-File',"`"$target`"") -WindowStyle Hidden
+        }
+        $win.Close()
+    } catch {
+        [System.Windows.MessageBox]::Show(
+            "Couldn't update automatically.`n`n$($_.Exception.Message)`n`nYou can re-download from:`nhttps://github.com/vansummers/ActionTracker",
+            'Action Tracker', 'OK', 'Warning') | Out-Null
+    }
+}
+$updateBtn.Add_Click({ Invoke-SelfUpdate })
+
+# Non-blocking check: show the Update button only if GitHub has a newer version.
+try {
+    $checker = New-Object System.Net.WebClient
+    $checker.Headers.Add('User-Agent', 'ActionTracker')
+    $checker.add_DownloadStringCompleted({
+        param($s, $e)
+        if ($e.Error) { return }
+        try {
+            $remote = ("$($e.Result)").Trim()
+            if ($remote -and ([version]$remote -gt [version]$AppVersion)) {
+                $win.Dispatcher.Invoke([Action]{
+                    $updateBtn.ToolTip  = "Version $remote is available (you have $AppVersion) — click to update"
+                    $updateBtn.Visibility = 'Visible'
+                })
+            }
+        } catch {}
+    })
+    $checker.DownloadStringAsync([uri]$VersionUrl)
+} catch {}
 
 # --- Show ---
 [void]$win.ShowDialog()

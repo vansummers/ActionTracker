@@ -81,6 +81,17 @@ Likely messages and what they mean:
 If you hit one of those, tell me the exact message and I'll confirm whether
 there's a permitted path or whether it genuinely needs IT.
 
+## Updating
+
+The widget checks GitHub at launch for a newer version. If one exists, a green
+**⬇ Update** button appears in the header — click it and the widget downloads the
+new version, replaces itself, and relaunches. Your tasks are untouched (they live
+in `%APPDATA%`). No button means you're already up to date.
+
+This requires the GitHub repo to be **public** (the check is an anonymous download);
+if the repo is private, the update check just stays quiet and you can update by
+re-downloading manually.
+
 ## Not included (yet)
 
 - Microsoft 365 sync (your Outlook tasks/To Do, calendar, mail). That needs your
