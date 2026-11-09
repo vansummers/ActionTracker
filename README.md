@@ -35,6 +35,12 @@ runs. Built to be **Themia-like for a to-do list**, but with no account and no s
   already used appear in the dropdown automatically.
 - **Due date column:** each task shows its due date. You can change an active
   task's due date right in its row. Overdue active tasks get a red **!**.
+- **Auto-sorted by due date:** actions always sort with the soonest due date at
+  the top. Actions with no due date fall to the bottom. The order updates
+  automatically as you add actions or change their due dates.
+- **Filter by project:** the dropdown at the bottom-left lets you show only the
+  actions in one project (or "All projects"). It resets to All each time you open
+  the widget.
 - **Complete a task:** click its checkbox. It moves to the **Completed** list for
   review, and its checkbox turns into a green **✓ <date>** stamp showing when it
   was done.

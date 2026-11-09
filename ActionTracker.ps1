@@ -41,7 +41,12 @@ public class TrackerTask : INotifyPropertyChanged {
     }
     public DateTime? Due {
         get { return _due; }
-        set { _due = value; OnChanged("Due"); OnChanged("IsOverdue"); }
+        set { _due = value; OnChanged("Due"); OnChanged("IsOverdue"); OnChanged("SortKey"); }
+    }
+    // Sort key: tasks with a due date sort by it (earliest first); tasks with no
+    // due date sort to the bottom.
+    public DateTime SortKey {
+        get { return _due.HasValue ? _due.Value : DateTime.MaxValue; }
     }
     public DateTime? CompletedAt {
         get { return _completedAt; }
@@ -81,7 +86,7 @@ public class TrackerTask : INotifyPropertyChanged {
 "@
 
 # --- Version / auto-update ---
-$AppVersion = '1.2.2'
+$AppVersion = '1.3.0'
 $RepoRaw    = 'https://raw.githubusercontent.com/vansummers/ActionTracker/main'
 $VersionUrl = "$RepoRaw/version.txt"
 $ScriptUrl  = "$RepoRaw/ActionTracker.ps1"
@@ -362,12 +367,16 @@ if (-not (Test-Path $AppDir)) { New-Item -ItemType Directory -Path $AppDir -Forc
       <!-- Footer -->
       <Grid Grid.Row="3" Margin="12,4,12,10">
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="Auto"/>
         </Grid.ColumnDefinitions>
-        <TextBlock x:Name="CountText" Grid.Column="0" Foreground="#9AA0A6" FontSize="11"
+        <ComboBox x:Name="FilterCombo" Grid.Column="0" Width="132" FontSize="11"
+                  VerticalAlignment="Center" Margin="0,0,8,0"
+                  ToolTip="Show only actions in a chosen project"/>
+        <TextBlock x:Name="CountText" Grid.Column="1" Foreground="#9AA0A6" FontSize="11"
                    VerticalAlignment="Center"/>
-        <Button x:Name="ClearBtn" Grid.Column="1" Style="{StaticResource IconBtn}"
+        <Button x:Name="ClearBtn" Grid.Column="2" Style="{StaticResource IconBtn}"
                 Content="Clear completed" FontSize="11" Visibility="Collapsed"
                 ToolTip="Permanently remove all completed actions"/>
       </Grid>
@@ -392,30 +401,44 @@ $closeBtn  = $win.FindName('CloseBtn')
 $clearBtn  = $win.FindName('ClearBtn')
 $updateBtn = $win.FindName('UpdateBtn')
 $dockBtn   = $win.FindName('DockBtn')
+$filterCombo = $win.FindName('FilterCombo')
 
 # --- State ---
 $allTasks = New-Object 'System.Collections.ObjectModel.ObservableCollection[TrackerTask]'
 $projects = New-Object 'System.Collections.ObjectModel.ObservableCollection[string]'
-$list.ItemsSource     = $allTasks
+$filterOptions = New-Object 'System.Collections.ObjectModel.ObservableCollection[string]'
+$filterOptions.Add('All projects')
+$list.ItemsSource      = $allTasks
 $projInput.ItemsSource = $projects
+$filterCombo.ItemsSource = $filterOptions
+$filterCombo.SelectedIndex = 0
 $script:view = [System.Windows.Data.CollectionViewSource]::GetDefaultView($allTasks)
 $script:showCompleted = $false
+$script:projectFilter = $null   # $null = show all projects
 $script:suppressSave  = $true   # don't save while loading
 $script:dockEnabled   = $false  # edge auto-hide ("peek") mode
 $script:dockWanted    = $false  # restored from saved state, applied once the window loads
 $script:dockHideAt    = $null
 $script:dockPrevTopmost = $false
 
-# Filter: active view shows not-done; completed view shows done
+# Filter: by active/completed view, and (optionally) by a chosen project
 $script:view.Filter = [Predicate[object]]{
     param($o)
-    if ($script:showCompleted) { return [bool]$o.Done } else { return -not [bool]$o.Done }
+    if ($script:showCompleted) { if (-not $o.Done) { return $false } }
+    else                       { if ($o.Done)      { return $false } }
+    if ($script:projectFilter -and ($o.Project -ne $script:projectFilter)) { return $false }
+    return $true
 }
+
+# Always keep actions sorted by soonest due date (no-due-date actions fall to the bottom)
+$script:view.SortDescriptions.Add(
+    (New-Object System.ComponentModel.SortDescription('SortKey', [System.ComponentModel.ListSortDirection]::Ascending)))
 
 function Add-Project([string]$name) {
     if ([string]::IsNullOrWhiteSpace($name)) { return }
     $name = $name.Trim()
-    if (-not ($projects -contains $name)) { $projects.Add($name) }
+    if (-not ($projects -contains $name))      { $projects.Add($name) }
+    if (-not ($filterOptions -contains $name)) { $filterOptions.Add($name) }
 }
 
 function Update-Footer {
@@ -480,8 +503,9 @@ $onTaskChanged = {
     param($s, $e)
     Save-State
     Update-Footer
-    if ($e.PropertyName -eq 'Done') { Refresh-View }
     if ($e.PropertyName -eq 'Project') { Add-Project $s.Project }
+    # Re-sort / re-filter when something that affects order or visibility changes
+    if ($e.PropertyName -eq 'Done' -or $e.PropertyName -eq 'Due' -or $e.PropertyName -eq 'Project') { Refresh-View }
 }
 
 function Register-Task([TrackerTask]$item) {
@@ -587,6 +611,14 @@ $list.AddHandler(
 # View toggle (active <-> completed)
 $viewBtn.Add_Click({
     $script:showCompleted = -not $script:showCompleted
+    Refresh-View
+    Update-Footer
+})
+
+# Project filter dropdown
+$filterCombo.Add_SelectionChanged({
+    if ($filterCombo.SelectedIndex -le 0) { $script:projectFilter = $null }
+    else { $script:projectFilter = [string]$filterCombo.SelectedItem }
     Refresh-View
     Update-Footer
 })
